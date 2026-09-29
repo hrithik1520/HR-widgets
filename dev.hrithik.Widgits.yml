@@ -1,0 +1,51 @@
+app-id: dev.hrithik.Widgits
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: widgits
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=network                    # so the system widget sees real network traffic
+  - --talk-name=org.mpris.MediaPlayer2.* # media widget: talk to any player on the host
+  - --filesystem=xdg-config/widgits      # positions.json
+modules:
+  - name: gtk4-layer-shell
+    buildsystem: meson
+    config-opts: [-Dexamples=false, -Ddocs=false, -Dtests=false, -Dsmoke-tests=false, -Dvapi=false]
+    sources:
+      - type: archive
+        url: https://github.com/wmww/gtk4-layer-shell/archive/refs/tags/v1.3.0.tar.gz
+        sha256: 1ebb01ab14e98afd1727f68f64981c37bd23305b1f131f5667c02b94cf593192
+
+  - name: playerctl
+    buildsystem: meson
+    config-opts: [-Dintrospection=true, -Dgtk-doc=false, -Dbash-completions=false, -Dzsh-completions=false]
+    sources:
+      - type: archive
+        url: https://github.com/altdesktop/playerctl/archive/refs/tags/v2.4.1.tar.gz
+        sha256: 75957ad5071956f563542c7557af16a57e40b4a7f66bc9b6373d022ec5eef548
+
+  - name: python3-psutil
+    buildsystem: simple
+    build-commands:
+      - pip3 install --verbose --exists-action=i --no-index --prefix=${FLATPAK_DEST} --no-build-isolation psutil-7.2.2.tar.gz
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/aa/c6/d1ddf4abb55e93cebc4f2ed8b5d6dbad109ecb8d63748dd2b20ab5e57ebe/psutil-7.2.2.tar.gz
+        sha256: 0746f5f8d406af344fd547f1c8daa5f5c33dbc293bb8d6a16d80b4bb88f59372
+
+  - name: widgits
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 widgits.py ${FLATPAK_DEST}/bin/widgits
+      - install -Dm644 dev.hrithik.Widgits.desktop ${FLATPAK_DEST}/share/applications/dev.hrithik.Widgits.desktop
+      - install -Dm644 dev.hrithik.Widgits.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/dev.hrithik.Widgits.svg
+    sources:
+      - type: file
+        path: widgits.py
+      - type: file
+        path: dev.hrithik.Widgits.desktop
+      - type: file
+        path: dev.hrithik.Widgits.svg

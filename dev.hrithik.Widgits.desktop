@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Widgits
+Comment=Desktop widgets: clock, system monitor, media, notes
+Exec=widgits
+Icon=dev.hrithik.Widgits
+Terminal=false
+Categories=Utility;

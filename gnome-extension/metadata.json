@@ -1,0 +1,7 @@
+{
+  "uuid": "widgits-pin@hrithik.dev",
+  "name": "Widgits Desktop Pin",
+  "description": "Keeps Widgits windows on the desktop: on every workspace, below other windows, and remembers where you drag them.",
+  "shell-version": ["48", "49", "50"],
+  "version": 1
+}
