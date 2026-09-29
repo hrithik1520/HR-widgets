@@ -103,12 +103,34 @@ export default class WidgitsPin extends Extension {
         const saved = this._positions[title];
         if (saved)
             win.move_frame(true, saved[0], saved[1]);
+        else
+            this._placeFree(win, title);
         win.lower();
 
         this._tracked.set(win, [
             win.connect('position-changed', () => this._scheduleSave(win, title)),
             win.connect('unmanaged', () => this._tracked?.delete(win)),
         ]);
+    }
+
+    // First free spot on the monitor where the widget doesn't touch any other widget.
+    _placeFree(win, title) {
+        const area = win.get_work_area_current_monitor();
+        const size = win.get_frame_rect();
+        const gap = 24;
+        const others = [...this._tracked.keys()].filter(w => w !== win).map(w => w.get_frame_rect());
+        const clash = (x, y) => others.some(o => x < o.x + o.width + gap && x + size.width + gap > o.x &&
+                                                   y < o.y + o.height + gap && y + size.height + gap > o.y);
+        for (let y = area.y + gap; y + size.height <= area.y + area.height - gap; y += gap) {
+            for (let x = area.x + gap; x + size.width <= area.x + area.width - gap; x += gap) {
+                if (clash(x, y))
+                    continue;
+                win.move_frame(true, x, y);
+                this._positions[title] = [x, y];
+                savePositions(this._positions);
+                return;
+            }
+        }
     }
 
     _lowerAll() {

@@ -9,6 +9,8 @@ finish-args:
   - --device=dri
   - --share=network                    # so the system widget sees real network traffic
   - --talk-name=org.mpris.MediaPlayer2.* # media widget: talk to any player on the host
+  - --system-talk-name=org.bluez         # Mono card: Bluetooth status
+  - --filesystem=xdg-config/clockwidget:ro # Mono card: sleep.json
   - --filesystem=xdg-config/widgits      # positions.json
   # Adaptive theme: read the host wallpaper setting and image
   - --filesystem=xdg-run/dconf
@@ -53,6 +55,29 @@ modules:
       - type: file
         url: https://files.pythonhosted.org/packages/4a/d8/1ed47f8e29fc6ed999eb9ad20e9a0d44514151eab1f1803af3368d5da7d7/materialyoucolor-3.0.4-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
         sha256: bb7a7fa56467fbda693d2337c9752b1b306fec5c59d304bae3f4b4e8f283ee0d
+
+  - name: playfair-display   # numeral font for the Warped Clock (SIL Open Font License)
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 PlayfairDisplay.ttf ${FLATPAK_DEST}/share/fonts/PlayfairDisplay.ttf
+    sources:
+      - type: file
+        url: https://github.com/google/fonts/raw/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf
+        dest-filename: PlayfairDisplay.ttf
+        sha256: c40f2293766a503bc70cce9e512ef844a4ccb7cbcde792fe2ea31d191917d8d6
+
+  - name: space-mono   # Mono card font (SIL Open Font License)
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 SpaceMono-Regular.ttf ${FLATPAK_DEST}/share/fonts/SpaceMono-Regular.ttf
+      - install -Dm644 SpaceMono-Bold.ttf ${FLATPAK_DEST}/share/fonts/SpaceMono-Bold.ttf
+    sources:
+      - type: file
+        url: https://github.com/google/fonts/raw/main/ofl/spacemono/SpaceMono-Regular.ttf
+        sha256: 95837e182baeeada83368f7748db28357f0a1b75c6b84ff7065b5edf933c8e18
+      - type: file
+        url: https://github.com/google/fonts/raw/main/ofl/spacemono/SpaceMono-Bold.ttf
+        sha256: 405e73d41afb7e5906efce206a326af5c956f38e255f35421c260e861e599c59
 
   - name: widgits
     buildsystem: simple

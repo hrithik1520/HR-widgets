@@ -15,15 +15,15 @@ Drag a widget to move it. Right-click a widget for a menu: open the manager, mak
 
 Everything else (GTK 4, libadwaita, playerctl, psutil, gtk4-layer-shell) is bundled in the Flatpak.
 
-## Download (v1.0.0, x86_64)
+## Download (v1.0.1, x86_64)
 
 The quickest way, no build needed. Get the files from the [latest release](https://github.com/hrithik1520/HR-widgets/releases/latest):
 
-- `Widgits-1.0.0-x86_64.flatpak`: the app
+- `Widgits-1.0.1-x86_64.flatpak`: the app
 - `widgits-pin@hrithik.dev.zip`: the GNOME extension (GNOME only, see below)
 
 ```sh
-flatpak install --user Widgits-1.0.0-x86_64.flatpak
+flatpak install --user Widgits-1.0.1-x86_64.flatpak
 flatpak run dev.hrithik.Widgits
 # GNOME only:
 gnome-extensions install --force widgits-pin@hrithik.dev.zip
@@ -93,6 +93,54 @@ For `adaptive`, the seed color comes from the first source that works: `theme.se
 ```
 
 `pixel_face` can be `"filled"` (tonal face) or `"frame"` (outline only). In the Flatpak, wallpapers in `~/Pictures` and `~/.local/share/backgrounds` are readable; for a wallpaper elsewhere, set `seed` or copy the image into one of those folders.
+
+## Warped Clock
+
+An analog clock with no card: numerals melt around a tall, tilted oval, with thin leaf-tipped hands, small text above them and a `day date` line below. All colors come from the theme, so it follows Dark, Adaptive or Auto. If the wallpaper makes the ink hard to read (under 4.5:1 contrast), the ink flips to the opposite tone or gains a thin halo. Colors fade over about 300 ms when the wallpaper or theme changes.
+
+Adjust it under Appearance, or in `config.json`:
+
+```json
+{
+  "theme": {"mode": "adaptive", "variant": "tonal_spot"},
+  "warped": {
+    "backing": "none",
+    "plate_opacity": 1.0,
+    "accent_hands": true,
+    "tilt": -12,
+    "distortion": 0.9,
+    "font": "Playfair Display",
+    "micro_text": "quartz",
+    "smooth": true
+  }
+}
+```
+
+`variant` is `tonal_spot`, `vibrant` or `monochrome` (near-grayscale ink for a poster look). `backing` is `none` or `plate` (a surface-colored oval behind the ring). `distortion` runs from 0 (a plain oval) to 1 (full melt). Playfair Display is bundled in the Flatpak; without it the clock falls back to DM Serif Display, Fraunces or a system serif.
+
+## Mono Card
+
+A square black info card in a dot-matrix, monoline spirit: the date in bold monospace, a large thin time with a slashed zero and small superscript seconds, an optional sleep timeline, the temperature, and Bluetooth and headphone icons. Colors come from the theme: pure black with a `#FF4D00` accent in Dark, or a Material You palette in Adaptive. The `vibrant` color variant gives the closest Nothing look, and `monochrome` gives a white panel with black text. The palette crossfades on theme changes, and the text on the accent is nudged to black or white if the contrast drops under 4.5:1.
+
+- **Temperature:** from [Open-Meteo](https://open-meteo.com) (no key), refreshed every 15 minutes and cached. Set your location under Appearance or in the config.
+- **Bluetooth:** read from BlueZ over D-Bus. The icon dims when the adapter is off and shows a dot when a device is connected. The headphones icon only appears while a connected device is an audio headset or headphones.
+- **Sleep:** Linux has no native sleep source, so the card reads `~/.config/clockwidget/sleep.json` (see [examples/sleep.json](examples/sleep.json)). Times can be 12 or 24 hour. Turn the block off with `sleep.enabled`. With no file it shows "NO DATA".
+
+```json
+{
+  "mono": {
+    "show_seconds": true,
+    "show_bluetooth": true,
+    "show_headphones": true,
+    "corner_radius": 48,
+    "shadow": false,
+    "sleep": {"enabled": true},
+    "weather": {"lat": 15.49, "lon": 73.83, "unit": "C"}
+  }
+}
+```
+
+The dot-matrix time and temperature are drawn by the app, so they don't depend on a font. Space Mono, used for the date and labels, is bundled in the Flatpak.
 
 ## Keeping widgets under other windows
 
