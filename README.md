@@ -1,4 +1,4 @@
-# HR-Widgits
+# HR-widgets
 
 Desktop widgets for Linux with switchable visual styles. Open the app, pick a style, and add widgets to your desktop. Widgets sit on the desktop, under your other windows.
 
@@ -15,15 +15,15 @@ Drag a widget to move it. Right-click a widget for a menu: open the manager, mak
 
 Everything else (GTK 4, libadwaita, playerctl, psutil, gtk4-layer-shell) is bundled in the Flatpak.
 
-## Download (v2.0.0, x86_64)
+## Download (v1.0.0, x86_64)
 
-The quickest way, no build needed. Get the files from the [latest release](https://github.com/hrithik1520/HR-Widgits/releases/latest):
+The quickest way, no build needed. Get the files from the [latest release](https://github.com/hrithik1520/HR-widgets/releases/latest):
 
-- `Widgits-2.0.0-x86_64.flatpak`: the app
+- `Widgits-1.0.0-x86_64.flatpak`: the app
 - `widgits-pin@hrithik.dev.zip`: the GNOME extension (GNOME only, see below)
 
 ```sh
-flatpak install --user Widgits-2.0.0-x86_64.flatpak
+flatpak install --user Widgits-1.0.0-x86_64.flatpak
 flatpak run dev.hrithik.Widgits
 # GNOME only:
 gnome-extensions install --force widgits-pin@hrithik.dev.zip
@@ -54,8 +54,8 @@ If you skip `flatpak-builder`, `install.sh` installs the Flatpak version of it a
 ### 2. Clone and install
 
 ```sh
-git clone https://github.com/hrithik1520/HR-Widgits.git
-cd HR-Widgits
+git clone https://github.com/hrithik1520/HR-widgets.git
+cd HR-widgets
 ./install.sh
 ```
 
@@ -108,7 +108,7 @@ For `adaptive`, the seed color comes from the first source that works: `theme.se
 ## Update
 
 ```sh
-cd HR-Widgits
+cd HR-widgets
 git pull
 ./install.sh
 ```
