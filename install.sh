@@ -18,5 +18,5 @@ if [ "${XDG_CURRENT_DESKTOP#*GNOME}" != "$XDG_CURRENT_DESKTOP" ]; then
 fi
 mkdir -p "$HOME/.config/autostart"
 cp dev.hrithik.Widgits.desktop "$HOME/.config/autostart/"
-sed -i 's|^Exec=.*|Exec=flatpak run dev.hrithik.Widgits --background|' "$HOME/.config/autostart/dev.hrithik.Widgits.desktop"
+sed -i "0,/^Exec=/s|^Exec=.*|Exec=flatpak run dev.hrithik.Widgits --background|" "$HOME/.config/autostart/dev.hrithik.Widgits.desktop"
 echo "Run: flatpak run dev.hrithik.Widgits"

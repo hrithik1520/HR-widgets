@@ -30,9 +30,40 @@ export default class WidgitsPin extends Extension {
         this._restackId = global.display.connect('restacked', () => this._lowerAll());
         for (const actor of global.get_window_actors())
             this._track(actor.meta_window);
+        this._hideFromSwitchers();
+    }
+
+    // Keep widgets out of the Overview window grid and the Alt-Tab window list.
+    // Each patch is optional: if the Shell's internals differ, widgets just stay listed.
+    _hideFromSwitchers() {
+        const isWidget = w => !!w && this._tracked?.has(w.meta_window ?? w);
+
+        const display = global.display;
+        const origTabList = display.get_tab_list;
+        display.get_tab_list = function (...args) {
+            return origTabList.apply(this, args).filter(w => !isWidget(w));
+        };
+        this._restore = [() => { delete display.get_tab_list; }];
+
+        import('resource:///org/gnome/shell/ui/workspace.js').then(({Workspace}) => {
+            if (!this._restore)
+                return;   // disabled while the import was pending
+            const proto = Workspace.prototype;
+            for (const [obj, name] of [[proto, '_isOverviewWindow'], [Workspace, '_isOverviewWindow']]) {
+                const orig = obj[name];
+                if (typeof orig !== 'function')
+                    continue;
+                obj[name] = function (win, ...rest) {
+                    return !isWidget(win) && orig.call(this, win, ...rest);
+                };
+                this._restore.push(() => { obj[name] = orig; });
+            }
+        }).catch(e => console.error(`widgits-pin: overview patch failed: ${e}`));
     }
 
     disable() {
+        this._restore?.forEach(undo => undo());
+        this._restore = null;
         global.display.disconnect(this._createdId);
         global.display.disconnect(this._restackId);
         for (const [win, ids] of this._tracked)

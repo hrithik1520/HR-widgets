@@ -6,3 +6,8 @@ Exec=widgits
 Icon=dev.hrithik.Widgits
 Terminal=false
 Categories=Utility;
+Actions=manage;
+
+[Desktop Action manage]
+Name=Manage widgets
+Exec=widgits

@@ -5,7 +5,7 @@ Desktop widgets for Linux with switchable visual styles. Open the app, pick a st
 **Widgets:** Clock + calendar, System monitor (CPU, memory, network), Media player (MPRIS), Quick notes.
 **Styles:** Glassmorphism, Neumorphism, Claymorphism, Brutalism, Aurora, Terminal.
 
-Drag a widget to move it, right-click to remove it. Widgets and their positions are restored on login.
+Drag a widget to move it. Right-click a widget for a menu: open the manager, make it larger or smaller, or remove it. Ctrl + scroll over a widget also resizes it (50% to 200%), and the manager has per-widget and all-widget size sliders. Removing from the manager can be undone. Widgets and their positions are restored on login.
 
 ## Requirements
 
@@ -15,7 +15,30 @@ Drag a widget to move it, right-click to remove it. Widgets and their positions 
 
 Everything else (GTK 4, libadwaita, playerctl, psutil, gtk4-layer-shell) is bundled in the Flatpak.
 
-## Install
+## Download (v2.0.0, x86_64)
+
+The quickest way, no build needed. Get the files from the [latest release](https://github.com/hrithik1520/HR-Widgits/releases/latest):
+
+- `Widgits-2.0.0-x86_64.flatpak`: the app
+- `widgits-pin@hrithik.dev.zip`: the GNOME extension (GNOME only, see below)
+
+```sh
+flatpak install --user Widgits-2.0.0-x86_64.flatpak
+flatpak run dev.hrithik.Widgits
+# GNOME only:
+gnome-extensions install --force widgits-pin@hrithik.dev.zip
+```
+
+The Flatpak needs [Flatpak set up](https://flatpak.org/setup/) on your distro and pulls the GNOME runtime from Flathub the first time. On GNOME, log out and back in, then run `gnome-extensions enable widgits-pin@hrithik.dev`. To start Widgits at login, copy the autostart entry:
+
+```sh
+mkdir -p ~/.config/autostart
+printf '[Desktop Entry]\nType=Application\nName=Widgits\nExec=flatpak run dev.hrithik.Widgits --background\n' > ~/.config/autostart/dev.hrithik.Widgits.desktop
+```
+
+Or build from source instead:
+
+## Install from source
 
 ### 1. Install Flatpak and flatpak-builder
 
@@ -47,6 +70,29 @@ flatpak run dev.hrithik.Widgits
 ```
 
 Pick a style, click **Add** on a widget, and it appears on your desktop.
+
+## Pixel Clock theme
+
+The **Pixel Clock** is a Material You style clock: a scalloped analog face over a digital time and date. Its colors come from a theme, set in the manager under "Pixel Clock theme" or in `config.json`:
+
+| Mode | Colors |
+|---|---|
+| `dark` (default) | Fixed dark palette: bg `#1C1C1E`, text `#FFFFFF`, secondary `#9A9A9F`, accent `#E8622A` |
+| `adaptive` | Material You palette generated from your wallpaper |
+| `auto` | Follows the system light/dark setting, dark if it can't be read |
+
+For `adaptive`, the seed color comes from the first source that works: `theme.seed` in the config, the current wallpaper (`wallpaper_path` in the config, then GNOME's `picture-uri-dark` / `picture-uri`, then KDE Plasma's applet config), the desktop accent color, and finally `#E8622A`. Adaptive needs the `materialyoucolor` package, which the Flatpak bundles on x86_64; without it, adaptive falls back to dark. The palette re-checks every 30 seconds, so it follows wallpaper changes.
+
+`config.json` lives in `~/.var/app/dev.hrithik.Widgits/config/widgits/` (Flatpak) or `~/.config/widgits/`:
+
+```json
+{
+  "theme": {"mode": "adaptive", "seed": null, "wallpaper_path": null},
+  "pixel_face": "filled"
+}
+```
+
+`pixel_face` can be `"filled"` (tonal face) or `"frame"` (outline only). In the Flatpak, wallpapers in `~/Pictures` and `~/.local/share/backgrounds` are readable; for a wallpaper elsewhere, set `seed` or copy the image into one of those folders.
 
 ## Keeping widgets under other windows
 
@@ -84,7 +130,7 @@ Inside the Flatpak: `~/.var/app/dev.hrithik.Widgits/` (widget list, positions, n
 
 ## Run without Flatpak
 
-You need Python 3, GTK 4, libadwaita, playerctl with GObject introspection, psutil, and optionally gtk4-layer-shell for the desktop layer on non-GNOME compositors.
+You need Python 3, GTK 4, libadwaita, playerctl with GObject introspection, psutil, and optionally gtk4-layer-shell (desktop layer on non-GNOME compositors) and `pip install materialyoucolor` (adaptive theme).
 
 ```sh
 # Fedora
