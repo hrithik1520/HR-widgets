@@ -2,7 +2,7 @@
 
 Desktop widgets for Linux with switchable visual styles. Open the app, pick a style, and add widgets to your desktop. Widgets sit on the desktop, under your other windows.
 
-**Widgets:** Clock + calendar, System monitor (CPU, memory, network), Media player (MPRIS), Quick notes.
+**Widgets:** Clock with a notes calendar, analog and Pixel clocks, Warped Clock, Mono Card, System monitor (CPU, memory, network), Media player (MPRIS).
 **Styles:** Glassmorphism, Neumorphism, Claymorphism, Brutalism, Aurora, Terminal.
 
 Drag a widget to move it. Right-click a widget for a menu: open the manager, make it larger or smaller, or remove it. Ctrl + scroll over a widget also resizes it (50% to 200%), and the manager has per-widget and all-widget size sliders. Removing from the manager can be undone. Widgets and their positions are restored on login.
@@ -15,15 +15,15 @@ Drag a widget to move it. Right-click a widget for a menu: open the manager, mak
 
 Everything else (GTK 4, libadwaita, playerctl, psutil, gtk4-layer-shell) is bundled in the Flatpak.
 
-## Download (v1.0.1, x86_64)
+## Download (v1.0.2, x86_64)
 
 The quickest way, no build needed. Get the files from the [latest release](https://github.com/hrithik1520/HR-widgets/releases/latest):
 
-- `Widgits-1.0.1-x86_64.flatpak`: the app
+- `Widgits-1.0.2-x86_64.flatpak`: the app
 - `widgits-pin@hrithik.dev.zip`: the GNOME extension (GNOME only, see below)
 
 ```sh
-flatpak install --user Widgits-1.0.1-x86_64.flatpak
+flatpak install --user Widgits-1.0.2-x86_64.flatpak
 flatpak run dev.hrithik.Widgits
 # GNOME only:
 gnome-extensions install --force widgits-pin@hrithik.dev.zip
@@ -93,6 +93,21 @@ For `adaptive`, the seed color comes from the first source that works: `theme.se
 ```
 
 `pixel_face` can be `"filled"` (tonal face) or `"frame"` (outline only). In the Flatpak, wallpapers in `~/Pictures` and `~/.local/share/backgrounds` are readable; for a wallpaper elsewhere, set `seed` or copy the image into one of those folders.
+
+## Calendar notes and Google Calendar
+
+The **Clock** widget has a month calendar. Days with notes are marked. Click a day to open its notes: read them, delete them, or add a new one with an optional time (24 hour). Notes are shared by every Clock widget and saved on your machine.
+
+To also put notes in your Google Calendar, connect an account once:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Google Calendar API**.
+2. Open **OAuth consent screen**, choose External, and add your Google account as a test user. To stop the sign-in expiring every 7 days, set the publishing status to **In production** (Google shows an "unverified app" warning that you can click through for your own use).
+3. Open **Credentials**, choose **Create credentials, OAuth client ID**, and pick the type **Desktop app**.
+4. In Widgits, open **Appearance, Google Calendar**, paste the client ID and secret, press Apply on each, and click **Connect**. Approve access in the browser.
+
+After that, the notes popover has an "Add to Google Calendar" switch (on by default; change the default in Appearance). A note with a time becomes a one hour event, and a note without one becomes an all-day event. Deleting a note deletes its event. If you are offline, notes wait and are sent later. Widgits only asks for permission to create and delete events (the `calendar.events` scope). It uses your own client ID, so nothing goes through anyone else's servers. The sign-in token is stored in `google-token.json` in the config folder, readable only by you. Disconnect removes it.
+
+Widgits does not read your existing Google events. It only adds the notes you write here.
 
 ## Warped Clock
 

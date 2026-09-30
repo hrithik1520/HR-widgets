@@ -7,15 +7,24 @@ The chosen widgets are restored on the next start; `--background` restores them
 without opening the manager (used for autostart).
 """
 import cairo
+import base64
 import collections
 import copy
+import hashlib
+import http.server
 import json
 import math
+import os
 import re
+import secrets
 import sys
 import threading
+import time
+import urllib.error
+import urllib.parse
 import urllib.request
-from datetime import datetime
+import uuid
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import gi
@@ -193,7 +202,9 @@ def _build_config(cfg):
             **{k: v for k, v in cfg.get("mono", {}).items() if k not in ("sleep", "weather")},
             "sleep": {"enabled": True, **cfg.get("mono", {}).get("sleep", {})},
             "weather": {"lat": 15.49, "lon": 73.83, "unit": "C", **cfg.get("mono", {}).get("weather", {})}}
+    google = {"client_id": "", "client_secret": "", "sync_new": True, **cfg.get("google", {})}
     return {"theme": theme, "pixel_face": cfg.get("pixel_face", "filled"), "warped": warped, "mono": mono,
+            "google": google,
             "size": min(max(cfg.get("size", 1.0), SCALE_MIN), SCALE_MAX)}
 
 
@@ -477,6 +488,7 @@ class Widget(Gtk.Window):
         LayerShell.init_for_window(self)
         LayerShell.set_namespace(self, "widgits")
         LayerShell.set_layer(self, LayerShell.Layer.BACKGROUND)
+        LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.ON_DEMAND)  # notes need typing
         LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
         LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
         saved = load_json(POSITIONS_FILE, {}).get(self.title_text)
@@ -508,6 +520,352 @@ class Widget(Gtk.Window):
         """Called when the user removes the widget; persist anything that should survive an undo."""
 
 
+# ---- Calendar notes and Google Calendar ----------------------------------------------
+NOTES_JSON = DATA_DIR / "calendar-notes.json"
+TOKEN_FILE = CONFIG_DIR / "google-token.json"
+GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
+GOOGLE_EVENTS = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.events"
+TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def form_post(url, fields):
+    request = urllib.request.Request(url, urllib.parse.urlencode(fields).encode(), method="POST")
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return json.load(response)
+
+
+class GoogleCalendar:
+    """Minimal Google Calendar client: browser sign-in (OAuth with PKCE on a loopback port), then create and
+    delete events. You supply your own OAuth client ID, so nothing is shared with anyone else."""
+
+    def __init__(self):
+        self.token, self.expires = None, 0.0
+
+    @staticmethod
+    def credentials():
+        g = load_config()["google"]
+        return g["client_id"].strip(), g["client_secret"].strip()
+
+    def connected(self):
+        return TOKEN_FILE.exists()
+
+    def access_token(self):
+        if self.token and time.time() < self.expires - 60:
+            return self.token
+        client_id, secret = self.credentials()
+        data = form_post(GOOGLE_TOKEN, {"client_id": client_id, "client_secret": secret, "grant_type": "refresh_token",
+                                        "refresh_token": load_json(TOKEN_FILE, {})["refresh_token"]})
+        self.token, self.expires = data["access_token"], time.time() + data.get("expires_in", 3600)
+        return self.token
+
+    def api(self, method, url, body=None):
+        request = urllib.request.Request(url, json.dumps(body).encode() if body is not None else None, method=method,
+                                         headers={"Authorization": f"Bearer {self.access_token()}",
+                                                  "Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            raw = response.read()
+            return json.loads(raw) if raw else {}
+
+    def create_event(self, day, text, hm):
+        if hm:
+            start = datetime.fromisoformat(f"{day}T{hm}:00").astimezone()
+            body = {"summary": text, "start": {"dateTime": start.isoformat()},
+                    "end": {"dateTime": (start + timedelta(hours=1)).isoformat()}}
+        else:
+            body = {"summary": text, "start": {"date": day},
+                    "end": {"date": (date.fromisoformat(day) + timedelta(days=1)).isoformat()}}
+        return self.api("POST", GOOGLE_EVENTS, body)["id"]
+
+    def delete_event(self, event_id):
+        try:
+            self.api("DELETE", f"{GOOGLE_EVENTS}/{event_id}")
+        except urllib.error.HTTPError as e:
+            if e.code not in (404, 410):  # already gone counts as deleted
+                raise
+
+    def disconnect(self):
+        TOKEN_FILE.unlink(missing_ok=True)
+        self.token = None
+
+    def connect(self, done):
+        """Open the browser to sign in. done(ok, message) runs on the main loop."""
+        client_id, secret = self.credentials()
+        if not client_id or not secret:
+            done(False, "Enter your client ID and secret first")
+            return
+        verifier = secrets.token_urlsafe(64)
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        state = secrets.token_urlsafe(16)
+        result = {}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                query = {k: v[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).items()}
+                if "code" in query or "error" in query:
+                    result.update(query)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                ok = "code" in query
+                self.wfile.write(b"<h3>Widgits is connected to Google Calendar.</h3><p>You can close this tab.</p>"
+                                 if ok else b"<h3>Sign-in did not finish.</h3><p>You can close this tab.</p>")
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        server.timeout = 5
+        redirect = f"http://127.0.0.1:{server.server_port}"
+        url = GOOGLE_AUTH + "?" + urllib.parse.urlencode({
+            "client_id": client_id, "redirect_uri": redirect, "response_type": "code", "scope": GOOGLE_SCOPE,
+            "code_challenge": challenge, "code_challenge_method": "S256", "state": state,
+            "access_type": "offline", "prompt": "consent"})
+
+        def finish(ok, message):
+            GLib.idle_add(lambda: done(ok, message) or False)
+
+        def run():
+            deadline = time.time() + 180
+            try:
+                while not result and time.time() < deadline:
+                    server.handle_request()
+                if result.get("state", state) != state or "code" not in result:
+                    finish(False, "Sign-in was cancelled or timed out")
+                    return
+                data = form_post(GOOGLE_TOKEN, {"code": result["code"], "client_id": client_id, "client_secret": secret,
+                                                "redirect_uri": redirect, "grant_type": "authorization_code",
+                                                "code_verifier": verifier})
+                TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+                fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as f:
+                    json.dump({"refresh_token": data["refresh_token"]}, f)
+                self.token, self.expires = data["access_token"], time.time() + data.get("expires_in", 3600)
+                finish(True, "Connected to Google Calendar")
+            except (OSError, ValueError, KeyError) as e:
+                finish(False, f"Could not connect: {e}")
+            finally:
+                server.server_close()
+        threading.Thread(target=run, daemon=True).start()
+        try:
+            Gtk.UriLauncher.new(url).launch(None, None, lambda *_: None)
+        except (GLib.Error, TypeError):
+            Gio.AppInfo.launch_default_for_uri(url, None)
+
+
+GCAL = GoogleCalendar()
+
+
+class CalendarNotes:
+    """Notes attached to calendar days, shared by every Clock widget. New notes can also be sent to Google Calendar."""
+
+    def __init__(self):
+        data = load_json(NOTES_JSON, {})
+        self.days = data.get("days", {})       # "YYYY-MM-DD" -> [{id, text, time, gcal, pending}]
+        self.deleted = data.get("deleted", [])  # Google event ids still to delete
+        self.watchers = []
+
+    def watch(self, fn):
+        self.watchers.append(fn)
+
+    def unwatch(self, fn):
+        if fn in self.watchers:
+            self.watchers.remove(fn)
+
+    def changed(self):
+        save_json(NOTES_JSON, {"days": self.days, "deleted": self.deleted})
+        for fn in list(self.watchers):
+            fn()
+        return False
+
+    def get(self, day):
+        return self.days.get(day, [])
+
+    def marked(self, year, month):
+        prefix = f"{year:04d}-{month:02d}-"
+        return sorted(int(k[8:]) for k, v in self.days.items() if k.startswith(prefix) and v)
+
+    def add(self, day, text, hm, sync):
+        note = {"id": uuid.uuid4().hex, "text": text, "time": hm, "gcal": None, "pending": bool(sync)}
+        self.days.setdefault(day, []).append(note)
+        self.days[day].sort(key=lambda n: n["time"] or "")
+        self.changed()
+        if sync:
+            self.push(day, note)
+
+    def push(self, day, note):
+        def work():
+            try:
+                note["gcal"] = GCAL.create_event(day, note["text"], note["time"])
+                note["pending"] = False
+            except (OSError, ValueError, KeyError):
+                pass  # stays pending; retried later
+            GLib.idle_add(self.changed)
+        threading.Thread(target=work, daemon=True).start()
+
+    def remove(self, day, note_id):
+        note = next((n for n in self.days.get(day, []) if n["id"] == note_id), None)
+        if note is None:
+            return
+        self.days[day].remove(note)
+        if not self.days[day]:
+            del self.days[day]
+        if note["gcal"]:
+            self.deleted.append(note["gcal"])
+        self.changed()
+        self.flush()
+
+    def flush(self):
+        """Delete removed notes from Google Calendar."""
+        if not self.deleted or not GCAL.connected():
+            return
+
+        def work():
+            for event_id in list(self.deleted):
+                try:
+                    GCAL.delete_event(event_id)
+                    self.deleted.remove(event_id)
+                except (OSError, ValueError, KeyError):
+                    break
+            GLib.idle_add(self.changed)
+        threading.Thread(target=work, daemon=True).start()
+
+    def retry(self):
+        """Send notes that could not reach Google earlier, and finish pending deletes."""
+        if GCAL.connected():
+            for day, notes in self.days.items():
+                for note in notes:
+                    if note["pending"] and not note["gcal"]:
+                        self.push(day, note)
+            self.flush()
+        return True
+
+
+NOTES = CalendarNotes()
+
+
+class NotePopover(Gtk.Popover):
+    """Notes for one day: the list, plus a field to add another."""
+
+    def __init__(self, day):
+        super().__init__()
+        self.day = day
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, width_request=310,
+                      margin_top=14, margin_bottom=14, margin_start=14, margin_end=14)
+        box.append(Gtk.Label(label=date.fromisoformat(day).strftime("%A, %d %B"), xalign=0, css_classes=["title-4"]))
+        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
+        self.scroller = Gtk.ScrolledWindow(child=self.list, propagate_natural_height=True, max_content_height=220,
+                                           hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.empty = Gtk.Label(label="No notes yet. Add one below.", xalign=0, css_classes=["dim-label"])
+        box.append(self.scroller)
+        box.append(self.empty)
+
+        row = Gtk.Box(spacing=6)
+        self.entry = Gtk.Entry(placeholder_text="Add a note…", hexpand=True, activates_default=False)
+        self.time = Gtk.Entry(placeholder_text="HH:MM", max_length=5, width_chars=6, tooltip_text="Optional time, 24 hour")
+        self.entry.update_property([Gtk.AccessibleProperty.LABEL], ["Note text"])
+        self.time.update_property([Gtk.AccessibleProperty.LABEL], ["Time, optional"])
+        add = Gtk.Button(icon_name="list-add-symbolic", css_classes=["suggested-action", "circular"],
+                         tooltip_text="Add note", width_request=36, height_request=36)
+        add.update_property([Gtk.AccessibleProperty.LABEL], ["Add note"])
+        for w in (self.entry, self.time, add):
+            row.append(w)
+        box.append(row)
+
+        self.sync = Gtk.CheckButton(label="Add to Google Calendar", active=load_config()["google"]["sync_new"])
+        self.sync.set_visible(GCAL.connected())
+        box.append(self.sync)
+
+        self.entry.connect("activate", lambda *_: self.add())
+        self.time.connect("activate", lambda *_: self.add())
+        add.connect("clicked", lambda *_: self.add())
+        self.set_child(box)
+        NOTES.watch(self.render)
+        self.connect("closed", lambda *_: NOTES.unwatch(self.render))
+        self.render()
+
+    def render(self):
+        while row := self.list.get_first_child():
+            self.list.remove(row)
+        notes = NOTES.get(self.day)
+        for note in notes:
+            row = Adw.ActionRow(title=note["text"], use_markup=False, title_lines=3,
+                                subtitle=note["time"] or "All day")
+            if note["gcal"]:
+                icon, tip = "object-select-symbolic", "In Google Calendar"
+            elif note["pending"]:
+                icon, tip = "view-refresh-symbolic", "Waiting to reach Google Calendar"
+            else:
+                icon = None
+            if icon:
+                image = Gtk.Image(icon_name=icon, tooltip_text=tip)
+                image.update_property([Gtk.AccessibleProperty.LABEL], [tip])
+                row.add_suffix(image)
+            trash = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER, css_classes=["flat"],
+                               tooltip_text="Delete note", width_request=36, height_request=36)
+            trash.update_property([Gtk.AccessibleProperty.LABEL], [f"Delete note {note['text']}"])
+            trash.connect("clicked", lambda _b, n=note: NOTES.remove(self.day, n["id"]))
+            row.add_suffix(trash)
+            self.list.append(row)
+        self.scroller.set_visible(bool(notes))
+        self.empty.set_visible(not notes)
+
+    def add(self):
+        text = self.entry.get_text().strip()
+        if not text:
+            self.entry.grab_focus()
+            return
+        hm = self.time.get_text().strip()
+        match = TIME_RE.match(hm) if hm else None
+        if hm and not match:
+            self.time.add_css_class("error")
+            self.time.set_tooltip_text("Use a 24 hour time like 14:30")
+            self.time.grab_focus()
+            return
+        self.time.remove_css_class("error")
+        NOTES.add(self.day, text, f"{int(match.group(1)):02d}:{match.group(2)}" if match else None,
+                  self.sync.get_active() and self.sync.get_visible())
+        self.entry.set_text("")
+        self.time.set_text("")
+        self.entry.grab_focus()
+
+
+class NotesCalendar(Gtk.Calendar):
+    """The month calendar: days with notes are marked, and clicking a day opens its notes."""
+
+    def __init__(self):
+        super().__init__()
+        click = Gtk.GestureClick(button=1)
+        click.connect("released", self.on_release)
+        self.add_controller(click)
+        for prop in ("notify::month", "notify::year"):
+            self.connect(prop, lambda *_: self.update_marks())
+        NOTES.watch(self.update_marks)
+        self.connect("destroy", lambda *_: NOTES.unwatch(self.update_marks))
+        self.update_marks()
+
+    def update_marks(self):
+        self.clear_marks()
+        for day in NOTES.marked(self.get_year(), self.get_month() + 1):
+            self.mark_day(day)
+
+    def on_release(self, _gesture, _n, x, y):
+        if y < 0.27 * self.get_height():  # the month and year header and the weekday row
+            return
+        GLib.idle_add(self.open_notes, x, y)
+
+    def open_notes(self, x, y):
+        popover = NotePopover(f"{self.get_year():04d}-{self.get_month() + 1:02d}-{self.get_day():02d}")
+        popover.set_parent(self)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        popover.popup()
+        return False
+
+
 class ClockWidget(Widget):
     kind, label = "clock", "Clock"
 
@@ -517,7 +875,7 @@ class ClockWidget(Widget):
         self.date = Gtk.Label(xalign=0, css_classes=["date"])
         self.card.append(self.time)
         self.card.append(self.date)
-        self.card.append(Gtk.Calendar())
+        self.card.append(NotesCalendar())
         self.tick()
         self.every(1000, self.tick)
 
@@ -1526,7 +1884,7 @@ class NotesWidget(Widget):
 WIDGETS = {cls.kind: cls for cls in (ClockWidget, RoundClockWidget, SquareClockWidget, PixelClockWidget,
                                        PixelDigitalClockWidget, WarpedClockWidget, MonoCardWidget, SystemWidget, MediaWidget, NotesWidget)}
 CATALOG = (  # kind, icon, description
-    ("clock", "preferences-system-time-symbolic", "Time, date and a month calendar"),
+    ("clock", "preferences-system-time-symbolic", "Time, date and a calendar for notes"),
     ("clock_round", "preferences-system-time-symbolic", "Classic analog clock with a round face"),
     ("clock_square", "preferences-system-time-symbolic", "Analog clock with a rounded-square face"),
     ("clock_pixel", "preferences-system-time-symbolic", "Material You analog clock with a scalloped face"),
@@ -1551,8 +1909,7 @@ PAGES = (("gallery", "Gallery", "view-grid-symbolic"),
 
 
 SECTIONS = (("Clocks", ("clock", "clock_round", "clock_square", "clock_pixel", "clock_pixel_digital", "clock_warped")),
-            ("Info cards", ("mono_card", "system", "media")),
-            ("Tools", ("notes",)))
+            ("Info cards", ("mono_card", "system", "media")))
 
 
 def build_preview(kind, style):
@@ -1983,6 +2340,56 @@ class Manager(Adw.ApplicationWindow):
         mono.add(radius_row)
         page.add(mono)
 
+        gc = cfg["google"]
+        google = Adw.PreferencesGroup(
+            title="Google Calendar",
+            description="Notes you add to a day in the Clock can also be sent to your Google Calendar. "
+                        "Create a free OAuth client (type: Desktop app) in Google Cloud Console; the README has the steps.")
+
+        def set_google(**kw):
+            self.app.update_config(lambda c: c.setdefault("google", {}).update(kw))
+
+        client_id = Adw.EntryRow(title="Client ID", text=gc["client_id"], show_apply_button=True)
+        client_id.connect("apply", lambda r: set_google(client_id=r.get_text().strip()))
+        google.add(client_id)
+        client_secret = Adw.PasswordEntryRow(title="Client secret", text=gc["client_secret"], show_apply_button=True)
+        client_secret.connect("apply", lambda r: set_google(client_secret=r.get_text().strip()))
+        google.add(client_secret)
+
+        account = Adw.ActionRow(title="Account")
+        connect = Gtk.Button(valign=Gtk.Align.CENTER, css_classes=["pill"])
+        account.add_suffix(connect)
+
+        def show_state():
+            on = GCAL.connected()
+            account.set_subtitle("Connected. New notes can be added to your calendar." if on else "Not connected")
+            connect.set_label("Disconnect" if on else "Connect")
+            connect.remove_css_class("suggested-action" if on else "destructive-action")
+            connect.add_css_class("destructive-action" if on else "suggested-action")
+
+        def on_connect(_button):
+            if GCAL.connected():
+                GCAL.disconnect()
+                show_state()
+                return
+
+            def done(ok, message):
+                self.toasts.add_toast(Adw.Toast(title=message))
+                show_state()
+                if ok:
+                    NOTES.retry()
+            set_google(client_id=client_id.get_text().strip(), client_secret=client_secret.get_text().strip())
+            self.toasts.add_toast(Adw.Toast(title="Finish signing in in your browser"))
+            GCAL.connect(done)
+        connect.connect("clicked", on_connect)
+        show_state()
+        google.add(account)
+        auto = Adw.SwitchRow(title="Add new notes to Google Calendar", subtitle="You can still change it per note",
+                             active=gc["sync_new"])
+        auto.connect("notify::active", lambda r, _p: set_google(sync_new=r.get_active()))
+        google.add(auto)
+        page.add(google)
+
         sizing = Adw.PreferencesGroup(title="Widget size",
                                       description="Scales every widget at once, on top of each widget's own size.")
         overall = Adw.ActionRow(title="All widgets", subtitle="50% to 200%")
@@ -2037,6 +2444,8 @@ class App(Adw.Application):
                 Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
             for item in self.state["items"]:
                 self.spawn(item)
+            NOTES.retry()
+            GLib.timeout_add_seconds(300, NOTES.retry)
             if self.background and self.state["items"]:
                 return
         self.show_manager()
